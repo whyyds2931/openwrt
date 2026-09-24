@@ -31,9 +31,61 @@ jobs:
         run: |
           git clone https://github.com/SunBK201/UA3F.git package/UA3F
 
-      - name: Add BitSrunLoginGo package (深澜校园网自动登录)
+      - name: Add BitSrunLoginGo static binary (深澜校园网自动登录)
         run: |
-          git clone -b v3.6 --depth 1 https://github.com/Mmx233/BitSrunLoginGo_Openwrt.git package/BitSrunLoginGo
+          # 方案A：直接下载 v1.6.8 mipsle 静态二进制，跳过 Go 源码编译
+          wget -qO /tmp/bitsrun.tar.gz \
+            https://github.com/Mmx233/BitSrunLoginGo/releases/download/v1.6.8/bitsrun_linux_mipsle.tar.gz
+          tar xzf /tmp/bitsrun.tar.gz -C /tmp/
+          mkdir -p files/usr/bin files/etc/init.d files/etc/config
+          cp /tmp/bitsrun files/usr/bin/BitSrunLoginGo
+          chmod +x files/usr/bin/BitSrunLoginGo
+          # init 开机脚本（作者原版：守护进程 + 断线重连）
+          cat > files/etc/init.d/BitSrunLogin << 'EOF'
+          #!/bin/sh /etc/rc.common
+          #
+          # Copyright (C) 2021 Mmx
+          #
+          # This is free software, licensed under the GNU Affero General Public License v3.
+          #
+          START=99
+          STOP=15
+          SERVICE_DAEMONIZE=1
+          NAME=BitSrunLogin
+          start(){
+              /usr/bin/BitSrunLoginGo --config=/etc/config/BitSrunLoginGo.yaml --daemon
+          }
+          stop() {
+              killall -q BitSrunLoginGo
+          }
+          EOF
+          chmod +x files/etc/init.d/BitSrunLogin
+          # YAML 配置模板（用户 SSH 填入账号后启用）
+          cat > files/etc/config/BitSrunLoginGo.yaml << 'EOF'
+          form:
+            domain: "" # 登录页 IP 或域名（必填）
+            username: "" # 校园网账号
+            user_type: "" # 运营商后缀（如 cmcc，无则留空）
+            password: "" # 密码
+          meta:
+            "n": "200"
+            type: "1"
+            acid: "5"
+            enc: srun_bx1
+            os: Windows 10
+            name: windows
+            info_prefix: SRBX1
+            double_stack: false
+          settings:
+            basic:
+              https: false
+              skip_cert_verify: false
+              timeout: 5
+              interfaces: ""
+            guardian:
+              enable: false # 断线自动重连
+              retry_delay: 3
+          EOF
 
       - name: Enable BBR sysctl (网络拥塞控制)
         run: |
@@ -53,9 +105,6 @@ jobs:
           # BBR 拥塞控制内核模块
           CONFIG_PACKAGE_kmod-tcp-bbr=y
 
-          # 深澜校园网自动登录
-          CONFIG_PACKAGE_BitSrunLoginGo=y
-
           # UA3F 校园网UA伪装
           CONFIG_PACKAGE_ua3f=y
 
@@ -72,7 +121,10 @@ jobs:
           echo "=== 设备选择确认 ==="
           grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=" .config || true
           echo "=== 插件确认 ==="
-          grep -E "CONFIG_PACKAGE_(ua3f|bitsrunlogin-go|kmod-tcp-bbr)=" .config || true
+          grep -E "CONFIG_PACKAGE_(ua3f|kmod-tcp-bbr)=" .config || true
+          echo "=== 深澜自动登录文件确认 ==="
+          ls -la files/usr/bin/BitSrunLoginGo files/etc/init.d/BitSrunLogin files/etc/config/BitSrunLoginGo.yaml 2>&1 || true
+          file files/usr/bin/BitSrunLoginGo 2>/dev/null || true
           echo "=== 默认设备 ==="
           grep -E "CONFIG_TARGET_DEVICE_ramips_mt7621_DEVICE_" .config | head -20
 
