@@ -36,7 +36,7 @@
 
 		led_status_blue: sys_blue {
 			label = "blue:sys";
-			gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
+			gpios = <&gpio 16 GPIO_ACTIVE_LOW>;
 		};
 	};
 
@@ -58,53 +58,57 @@
 	};
 };
 
-&nand {
+&spi0 {
 	status = "okay";
 
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
+		m25p,fast-read;
 
-		partition@0 {
-			label = "u-boot";
-			reg = <0x000000 0x080000>;
-			read-only;
-		};
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
 
-		partition@80000 {
-			label = "u-boot-env";
-			reg = <0x080000 0x040000>;
-		};
-		partition@c0000 {
-			label = "Factory";
-			reg = <0x0c0000 0x040000>;
-			read-only;
-			nvmem-layout {
-				compatible = "fixed-layout";
-				#address-cells = <1>;
-				#size-cells = <1>;
-				eeprom_factory: eeprom@0 {
-					reg = <0x0 0xe00>;
-				};
+			partition@0 {
+				label = "u-boot";
+				reg = <0x00000 0x30000>;
+				read-only;
+			};
 
-				macaddr_factory_3fff4: macaddr@3fff4 {
-					reg = <0x3fff4 0x6>;
-				};
+			partition@30000 {
+				label = "u-boot-env";
+				reg = <0x30000 0x10000>;
+				read-only;
+			};
 
-				macaddr_factory_3fffa: macaddr@3fffa {
-					reg = <0x3fffa 0x6>;
+			partition@40000 {
+				label = "factory";
+				reg = <0x40000 0x10000>;
+				read-only;
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+					eeprom_factory: eeprom@0 {
+						reg = <0x0 0xe00>;
+					};
+					macaddr_factory_3fff4: macaddr@3fff4 {
+						reg = <0x3fff4 0x6>;
+					};
+					macaddr_factory_3fffa: macaddr@3fffa {
+						reg = <0x3fffa 0x6>;
+					};
 				};
 			};
-		};
-		partition@180000 {  
-		label = "kernel";
-		reg = <0x180000 0x400000>;  /* 4MB */
-		};
-		partition@580000 {  
-			label = "firmware";
-			reg = <0x580000 0x7a80000>;
-			compatible = "linux,ubi";
+
+			partition@50000 {
+				compatible = "denx,uimage";
+				label = "firmware";
+				reg = <0x50000 0xfb0000>;
+			};
 		};
 	};
 };
@@ -129,29 +133,31 @@
 };
 
 &gmac1 {
-	status = "okay";
-	label = "wan";
-	phy-handle = <&ethphy4>;
-
-	nvmem-cells = <&macaddr_factory_3fffa>;
-	nvmem-cell-names = "mac-address";
+    status = "disabled";
 };
 
 &switch0 {
-	ports {
-		port@0 {
-			status = "okay";
-			label = "lan1";
-		};
-		port@1 {
-			status = "okay";
-			label = "lan2";
-		};
-		port@2 {
-			status = "okay";
-			label = "lan3";
-		};
-	};
+    status = "okay";
+    ports {
+        port@0 {
+            status = "okay";
+            label = "lan1";
+        };
+        port@1 {
+            status = "okay";
+            label = "lan2";
+        };
+        port@2 {
+            status = "okay";
+            label = "lan3";
+        };
+        port@3 {
+            status = "okay";
+            label = "wan";
+            nvmem-cells = <&macaddr_factory_3fffa>;
+            nvmem-cell-names = "mac-address";
+        };
+    };
 };
 
 &state_default {
