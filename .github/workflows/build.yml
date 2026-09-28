@@ -1,149 +1,434 @@
-name: Build OpenWrt 24.10 Qihoo 360 T6GS
+name: Build ImmortalWrt 360T6GS (UA3F + 深澜 + BBR)
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+
+env:
+  TZ: Asia/Shanghai
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
+      actions: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+    - name: 初始化编译环境
+      run: |
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install -y build-essential clang flex bison gawk gcc-multilib g++-multilib \
+          gettext git libncurses-dev libssl-dev python3 python3-distutils rsync unzip zlib1g-dev \
+          file wget subversion ccache upx xsltproc libxml-parser-perl binutils
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib \
-            g++-multilib gettext git libncurses-dev libssl-dev python3-setuptools \
-            rsync swig unzip zlib1g-dev file qemu-utils upx
+    - name: 拉取 ImmortalWrt 25.12 源码
+      run: |
+        git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git -b openwrt-25.12 openwrt
+        echo "OPENWRT_PATH=$PWD/openwrt" >> $GITHUB_ENV
 
-      - name: Update feeds
-        run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+    - name: 写入 360T6GS 设备定义 (NAND)
+      run: |
+        set -e
+        cd $OPENWRT_PATH
 
-      - name: Add UA3F package (校园网UA伪装)
-        run: |
-          git clone https://github.com/SunBK201/UA3F.git package/UA3F
+        # ========== 1. 设备树 (NAND: u-boot 512K + env 256K + Factory 256K + kernel 4MB + UBI 122MB) ==========
+        cat > target/linux/ramips/dts/mt7621_qihoo_360t6gs.dts <<'DTS_EOF'
+        // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 
-      - name: Add BitSrunLoginGo static binary (深澜校园网自动登录)
-        run: |
-          # 方案A：直接下载 v1.6.8 mipsle 静态二进制，跳过 Go 源码编译
-          # UPX 压缩（9.4MB → ~3MB），适配 16MB SPI-NOR 空间
-          wget -qO /tmp/bitsrun.tar.gz \
-            https://github.com/Mmx233/BitSrunLoginGo/releases/download/v1.6.8/bitsrun_linux_mipsle.tar.gz
-          tar xzf /tmp/bitsrun.tar.gz -C /tmp/
-          mkdir -p files/usr/bin files/etc/init.d files/etc/config
-          upx --lzma --best -o /tmp/bitsrun_upx /tmp/bitsrun
-          cp /tmp/bitsrun_upx files/usr/bin/BitSrunLoginGo
-          chmod +x files/usr/bin/BitSrunLoginGo
-          # init 开机脚本（作者原版：守护进程 + 断线重连）
-          cat > files/etc/init.d/BitSrunLogin << 'EOF'
-          #!/bin/sh /etc/rc.common
-          #
-          # Copyright (C) 2021 Mmx
-          #
-          # This is free software, licensed under the GNU Affero General Public License v3.
-          #
-          START=99
-          STOP=15
-          SERVICE_DAEMONIZE=1
-          NAME=BitSrunLogin
-          start(){
-              /usr/bin/BitSrunLoginGo --config=/etc/config/BitSrunLoginGo.yaml --daemon
-          }
-          stop() {
-              killall -q BitSrunLoginGo
-          }
-          EOF
-          chmod +x files/etc/init.d/BitSrunLogin
-          # YAML 配置模板（用户 SSH 填入账号后启用）
-          cat > files/etc/config/BitSrunLoginGo.yaml << 'EOF'
-          form:
-            domain: "" # 登录页 IP 或域名（必填）
-            username: "" # 校园网账号
-            user_type: "" # 运营商后缀（如 cmcc，无则留空）
-            password: "" # 密码
-          meta:
-            "n": "200"
-            type: "1"
-            acid: "5"
-            enc: srun_bx1
-            os: Windows 10
-            name: windows
-            info_prefix: SRBX1
-            double_stack: false
-          settings:
-            basic:
-              https: false
-              skip_cert_verify: false
-              timeout: 5
-              interfaces: ""
-            guardian:
-              enable: false # 断线自动重连
-              retry_delay: 3
-          EOF
+        #include "mt7621.dtsi"
 
-      - name: Enable BBR sysctl (网络拥塞控制)
-        run: |
-          mkdir -p files/etc/sysctl.d
-          cat > files/etc/sysctl.d/99-bbr.conf << 'EOF'
-          net.core.default_qdisc=fq
-          net.ipv4.tcp_congestion_control=bbr
-          EOF
+        #include <dt-bindings/gpio/gpio.h>
+        #include <dt-bindings/input/input.h>
 
-      - name: Generate .config
-        run: |
-          cat > .config << 'EOF'
-          CONFIG_TARGET_ramips=y
-          CONFIG_TARGET_ramips_mt7621=y
-          CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=y
+        / {
+        	compatible = "qihoo,360t6gs", "mediatek,mt7621-soc";
+        	model = "Qihoo 360 T6GS";
 
-          # BBR 拥塞控制内核模块
-          CONFIG_PACKAGE_kmod-tcp-bbr=y
+        	aliases {
+        		led-boot = &led_status_red;
+        		led-failsafe = &led_status_red;
+        		led-running = &led_status_green;
+        		led-upgrade = &led_status_green;
+        		label-mac-device = &gmac0;
+        	};
 
-          # UA3F 校园网UA伪装
-          CONFIG_PACKAGE_ua3f=y
+        	chosen {
+        		bootargs = "console=ttyS0,115200n8";
+        	};
 
-          # LuCI 精简（仅基础中文，去 openssl 省空间）
-          CONFIG_PACKAGE_luci=y
-          CONFIG_PACKAGE_luci-theme-bootstrap=y
-          CONFIG_LUCI_LANG_zh_Hans=y
-          EOF
-          make defconfig
+        	leds {
+        		compatible = "gpio-leds";
 
-      - name: Check device and packages selected
-        run: |
-          echo "=== 设备选择确认 ==="
-          grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=" .config || true
-          echo "=== 插件确认 ==="
-          grep -E "CONFIG_PACKAGE_(ua3f|kmod-tcp-bbr)=" .config || true
-          echo "=== 深澜自动登录文件确认 ==="
-          ls -la files/usr/bin/BitSrunLoginGo files/etc/init.d/BitSrunLogin files/etc/config/BitSrunLoginGo.yaml 2>&1 || true
-          file files/usr/bin/BitSrunLoginGo 2>/dev/null || true
-          echo "=== 默认设备 ==="
-          grep -E "CONFIG_TARGET_DEVICE_ramips_mt7621_DEVICE_" .config | head -20
+        		led_status_red: sys_red {
+        			label = "red:sys";
+        			gpios = <&gpio 13 GPIO_ACTIVE_LOW>;
+        		};
 
-      - name: Download packages
-        run: |
-          make download -j8 || make download -j1 V=s
+        		led_status_green: sys_green {
+        			label = "green:sys";
+        			gpios = <&gpio 15 GPIO_ACTIVE_LOW>;
+        		};
 
-      - name: Build firmware
-        run: |
-          make -j$(nproc) || make -j1 V=s
+        		led_status_blue: sys_blue {
+        			label = "blue:sys";
+        			gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
+        		};
+        	};
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenWrt_firmware
-          path: |
-            bin/targets/ramips/mt7621/*.bin
-            bin/targets/ramips/mt7621/*.manifest
-            bin/targets/ramips/mt7621/*.itb
-            bin/targets/ramips/mt7621/*.img
-          if-no-files-found: warn
+        	keys {
+        		compatible = "gpio-keys-polled";
+        		poll-interval = <20>;
+
+        		reset {
+        			label = "reset";
+        			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
+        			linux,code = <KEY_RESTART>;
+        		};
+
+        		wps {
+        			label = "wps";
+        			gpios = <&gpio 6 GPIO_ACTIVE_LOW>;
+        			linux,code = <KEY_WPS_BUTTON>;
+        		};
+        	};
+        };
+
+        &nand {
+        	status = "okay";
+
+        	partitions {
+        		compatible = "fixed-partitions";
+        		#address-cells = <1>;
+        		#size-cells = <1>;
+
+        		partition@0 {
+        			label = "u-boot";
+        			reg = <0x000000 0x080000>;
+        			read-only;
+        		};
+
+        		partition@80000 {
+        			label = "u-boot-env";
+        			reg = <0x080000 0x040000>;
+        		};
+        		partition@c0000 {
+        			label = "Factory";
+        			reg = <0x0c0000 0x040000>;
+        			read-only;
+        			nvmem-layout {
+        				compatible = "fixed-layout";
+        				#address-cells = <1>;
+        				#size-cells = <1>;
+        				eeprom_factory: eeprom@0 {
+        					reg = <0x0 0xe00>;
+        				};
+
+        				macaddr_factory_3fff4: macaddr@3fff4 {
+        					reg = <0x3fff4 0x6>;
+        				};
+
+        				macaddr_factory_3fffa: macaddr@3fffa {
+        					reg = <0x3fffa 0x6>;
+        				};
+        			};
+        		};
+        		partition@180000 {
+        			label = "kernel";
+        			reg = <0x180000 0x400000>;  /* 4MB */
+        		};
+        		partition@580000 {
+        			label = "firmware";
+        			reg = <0x580000 0x7a80000>;
+        			compatible = "linux,ubi";
+        		};
+        	};
+        };
+        &pcie {
+        	status = "okay";
+        };
+
+        &pcie1 {
+        	wifi@0,0 {
+        		compatible = "mediatek,mt76";
+        		reg = <0x0000 0 0 0 0>;
+        		nvmem-cells = <&eeprom_factory>;
+        		nvmem-cell-names = "eeprom";
+        		mediatek,disable-radar-background;
+        	};
+        };
+
+        &gmac0 {
+        	status = "okay";
+        	nvmem-cells = <&macaddr_factory_3fff4>;
+        	nvmem-cell-names = "mac-address";
+        };
+
+        &gmac1 {
+        	status = "okay";
+        	label = "wan";
+        	nvmem-cells = <&macaddr_factory_3fffa>;
+        	nvmem-cell-names = "mac-address";
+        	fixed-link {
+        		speed = <1000>;
+        		full-duplex;
+        		pause;
+        	};
+        };
+
+        &switch0 {
+        	status = "okay";
+        	ports {
+        		port@0 {
+        			status = "okay";
+        			label = "lan1";
+        		};
+        		port@1 {
+        			status = "okay";
+        			label = "lan2";
+        		};
+        		port@2 {
+        			status = "okay";
+        			label = "lan3";
+        		};
+        		port@3 {
+        			status = "okay";
+        			label = "wan";
+        		};
+        	};
+        };
+
+        &state_default {
+        	gpio {
+        		groups = "jtag", "uart3","wdt";
+        		function = "gpio";
+        	};
+        };
+        DTS_EOF
+
+        # ========== 2. mt7621.mk 追加设备 (NAND + UBI kernel 卷) ==========
+        cat >> target/linux/ramips/image/mt7621.mk <<'MK_EOF'
+
+        define Device/qihoo_360t6gs
+          $(Device/nand)
+          $(Device/uimage-lzma-loader)
+          DEVICE_VENDOR := Qihoo
+          DEVICE_MODEL := 360 T6GS
+          IMAGE_SIZE := 125000k
+          KERNEL_IN_UBI := 1
+          IMAGES += firmware.bin
+          IMAGE/firmware.bin := append-kernel | pad-to $$(KERNEL_SIZE) | append-ubi | \
+        	check-size
+          DEVICE_PACKAGES += kmod-mt7915-firmware
+        endef
+        TARGET_DEVICES += qihoo_360t6gs
+        MK_EOF
+
+        # ========== 3. platform.sh 注册 NAND sysupgrade ==========
+        python3 - <<'PY_EOF'
+        p = 'target/linux/ramips/mt7621/base-files/lib/upgrade/platform.sh'
+        s = open(p).read()
+        anchor = '\tnetgear,wax202|\\\n'
+        assert anchor in s, 'platform.sh anchor not found'
+        s = s.replace(anchor, anchor + '\tqihoo,360t6gs|\\\n', 1)
+        open(p, 'w').write(s)
+        print('[OK] platform.sh patched')
+        PY_EOF
+
+        # ========== 4. 首次启动网络配置 (DSA: lan1-3 + wan) ==========
+        mkdir -p files/etc/uci-defaults
+        cat > files/etc/uci-defaults/99-360t6gs-network <<'UCI_EOF'
+        #!/bin/sh
+        # Qihoo 360T6GS 网络: lan1 lan2 lan3 + wan (DSA bridge)
+        uci -q batch <<-EOT
+        	delete network.lan
+        	set network.lan=interface
+        	set network.lan.proto='static'
+        	set network.lan.device='br-lan'
+        	set network.lan.ipaddr='192.168.1.1'
+        	set network.lan.netmask='255.255.255.0'
+        	delete network.wan
+        	set network.wan=interface
+        	set network.wan.proto='dhcp'
+        	set network.wan.device='wan'
+        	set network.@device[0].name='br-lan'
+        	set network.@device[0].type='bridge'
+        	set network.@device[0].ports='lan1 lan2 lan3'
+        	commit network
+        EOT
+        exit 0
+        UCI_EOF
+        chmod +x files/etc/uci-defaults/99-360t6gs-network
+
+        echo "[OK] 设备定义写入完成"
+
+    - name: 注入 UA3F (预编译 ipk + UPX)
+      run: |
+        set -e
+        cd $OPENWRT_PATH
+        wget -q https://github.com/SunBK201/UA3F/releases/download/v3.6.0/ua3f_3.6.0-r1_mipsel_24kc.ipk -O ua3f.ipk
+        rm -rf ua3f-unpack && mkdir ua3f-unpack
+        cd ua3f-unpack
+        ar x ../ua3f.ipk
+        tar xzf data.tar.gz
+        cd ..
+        # 全部复制进 files/（二进制 + init.d + config + luci 前端）
+        mkdir -p files
+        cp -r ua3f-unpack/* files/
+        # UPX 压缩 Go 二进制 17MB -> ~3.7MB
+        upx --lzma -q -o files/usr/bin/ua3f.upx files/usr/bin/ua3f
+        mv files/usr/bin/ua3f.upx files/usr/bin/ua3f
+        chmod +x files/usr/bin/ua3f
+        echo "[OK] UA3F: $(du -h files/usr/bin/ua3f | cut -f1)"
+
+    - name: 注入 BitSrunLoginGo (深澜自动登录)
+      run: |
+        set -e
+        cd $OPENWRT_PATH
+        wget -q https://github.com/Mmx233/BitSrunLoginGo/releases/download/v1.6.8/bitsrun_linux_mipsle.tar.gz -O bslgo.tar.gz
+        rm -rf bslgo-unpack && mkdir bslgo-unpack
+        tar xzf bslgo.tar.gz -C bslgo-unpack
+        mkdir -p files/usr/bin files/etc/init.d files/etc/config
+        upx --lzma -q -o files/usr/bin/BitSrunLoginGo bslgo-unpack/bitsrun
+        chmod +x files/usr/bin/BitSrunLoginGo
+
+        cat > files/etc/init.d/BitSrunLogin <<'INIT_EOF'
+        #!/bin/sh /etc/rc.common
+        # BitSrunLoginGo 深澜校园网自动登录
+        # 配置: /etc/config/BitSrunLoginGo.yaml
+        START=95
+        STOP=10
+        USE_PROCD=1
+        PROG=/usr/bin/BitSrunLoginGo
+        CONF=/etc/config/BitSrunLoginGo.yaml
+        start_service() {
+            [ -f "$CONF" ] || return 0
+            procd_open_instance
+            procd_set_param command "$PROG" --config="$CONF" --daemon
+            procd_set_param respawn
+            procd_set_param stdout 1
+            procd_set_param stderr 1
+            procd_close_instance
+        }
+        stop_service() {
+            procd_kill "$PROG" 2>/dev/null
+        }
+        INIT_EOF
+        chmod +x files/etc/init.d/BitSrunLogin
+
+        cat > files/etc/config/BitSrunLoginGo.yaml <<'YAML_EOF'
+        # BitSrunLoginGo 深澜校园网自动登录配置
+        # 修改下方 username/password/host 后保存
+        # 启用: /etc/init.d/BitSrunLogin enable && /etc/init.d/BitSrunLogin start
+        username: "你的学号"
+        password: "你的密码"
+        host: "192.168.168.168"
+        port: 2060
+        https: false
+        timeout: 10
+        auto_retry: true
+        auto_retry_delay: 60
+        auto_retry_times: 0
+        daemon: true
+        syslog: false
+        log_level: 2
+        skip_cert_verify: false
+        disable_auto_login: false
+        YAML_EOF
+        echo "[OK] BitSrunLoginGo: $(du -h files/usr/bin/BitSrunLoginGo | cut -f1)"
+
+    - name: 注入 BBR 拥塞控制
+      run: |
+        cd $OPENWRT_PATH
+        mkdir -p files/etc/sysctl.d
+        cat > files/etc/sysctl.d/99-bbr.conf <<'BBR_EOF'
+        net.core.default_qdisc=fq
+        net.ipv4.tcp_congestion_control=bbr
+        BBR_EOF
+        echo "[OK] BBR sysctl 写入"
+
+    - name: 更新 feeds
+      run: |
+        cd $OPENWRT_PATH
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 生成编译配置 (精简)
+      run: |
+        cd $OPENWRT_PATH
+        cat > .config <<'CFG_EOF'
+        # 目标设备
+        CONFIG_TARGET_ramips=y
+        CONFIG_TARGET_ramips_mt7621=y
+        CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=y
+        # LuCI 界面
+        CONFIG_PACKAGE_luci=y
+        CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+        CONFIG_PACKAGE_luci-compat=y
+        # WiFi6 无线
+        CONFIG_PACKAGE_kmod-mt7915-firmware=y
+        # BBR 拥塞控制
+        CONFIG_PACKAGE_kmod-tcp-bbr=y
+        # UA3F 依赖 (iptables TPROXY 全家)
+        CONFIG_PACKAGE_ipset=y
+        CONFIG_PACKAGE_iptables=y
+        CONFIG_PACKAGE_iptables-mod-tproxy=y
+        CONFIG_PACKAGE_iptables-mod-extra=y
+        CONFIG_PACKAGE_iptables-mod-ipopt=y
+        CONFIG_PACKAGE_iptables-mod-nfqueue=y
+        CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
+        CONFIG_PACKAGE_kmod-nf-conntrack-netlink=y
+        # 精简: 去掉不必要的大件
+        # CONFIG_PACKAGE_luci-app-turboacc is not set
+        # CONFIG_PACKAGE_luci-app-ddns is not set
+        # CONFIG_PACKAGE_luci-app-vsftpd is not set
+        # CONFIG_PACKAGE_luci-app-unbound is not set
+        # CONFIG_PACKAGE_luci-app-wol is not set
+        # CONFIG_PACKAGE_luci-app-adguardhome is not set
+        # CONFIG_PACKAGE_luci-app-zerotier is not set
+        # CONFIG_PACKAGE_luci-app-aria2 is not set
+        # CONFIG_PACKAGE_luci-app-nlbwmon is not set
+        # CONFIG_PACKAGE_luci-app-mwan3 is not set
+        # CONFIG_PACKAGE_luci-app-accesscontrol is not set
+        # CONFIG_PACKAGE_luci-app-upnp is not set
+        CFG_EOF
+        sed -i 's/^[[:space:]]*//' .config
+        make defconfig 2>&1 | tail -5
+        echo "=== 关键配置验证 ==="
+        grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=|CONFIG_PACKAGE_kmod-tcp-bbr=|CONFIG_PACKAGE_ua3f=" .config || true
+        grep "CONFIG_PACKAGE_ua3f" .config || echo "注意: ua3f 通过 files/ 注入, 无独立 CONFIG"
+
+    - name: 下载依赖包
+      run: |
+        cd $OPENWRT_PATH
+        make download -j$(nproc) 2>&1 | tail -5 || make download -j1 V=s
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 编译固件
+      run: |
+        cd $OPENWRT_PATH
+        make -j$(($(nproc) + 1)) 2>&1 | tail -20 || make -j1 V=s
+
+    - name: 整理产物
+      run: |
+        set -e
+        cd $OPENWRT_PATH/bin/targets/ramips/mt7621
+        echo "=== 编译产物 ==="
+        ls -lh *.bin
+        # 大小校验: NAND 固件应 20-40MB
+        for f in *.bin; do
+          S=$(stat -c%s "$f")
+          echo "$f: $((S/1024/1024))MB ($S bytes)"
+        done
+
+    - name: 上传固件
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenWrt_firmware
+        path: ${{ env.OPENWRT_PATH }}/bin/targets/ramips/mt7621/*.bin
+        retention-days: 14
