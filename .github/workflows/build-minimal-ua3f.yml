@@ -293,7 +293,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 生成编译配置 (极简: 仅 UA3F)
+    - name: 生成编译配置（仅 UA3F 极简）
       run: |
         cd $OPENWRT_PATH
         cat > .config <<'CFG_EOF'
@@ -307,6 +307,10 @@ jobs:
         CONFIG_PACKAGE_luci-compat=y
         # WiFi6 无线
         CONFIG_PACKAGE_kmod-mt7915-firmware=y
+        # UA3F TPROXY 内核模块 (nftables + iptables + queue)
+        CONFIG_PACKAGE_kmod-nft-tproxy=y
+        CONFIG_PACKAGE_kmod-ipt-tproxy=y
+        CONFIG_PACKAGE_kmod-nft-queue=y
         # UA3F 依赖 (iptables TPROXY 全家)
         CONFIG_PACKAGE_ipset=y
         CONFIG_PACKAGE_iptables=y
@@ -316,10 +320,6 @@ jobs:
         CONFIG_PACKAGE_iptables-mod-nfqueue=y
         CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
         CONFIG_PACKAGE_kmod-nf-conntrack-netlink=y
-        # UA3F TPROXY 内核模块 (nftables + iptables + queue)
-        CONFIG_PACKAGE_kmod-nft-tproxy=y
-        CONFIG_PACKAGE_kmod-ipt-tproxy=y
-        CONFIG_PACKAGE_kmod-nft-queue=y
         CFG_EOF
         sed -i 's/^[[:space:]]*//' .config
         make defconfig 2>&1 | tail -5
