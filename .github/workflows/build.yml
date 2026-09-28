@@ -274,7 +274,8 @@ jobs:
         wget -q https://github.com/SunBK201/UA3F/releases/download/v3.6.0/ua3f_3.6.0-r1_mipsel_24kc.ipk -O ua3f.ipk
         rm -rf ua3f-unpack && mkdir ua3f-unpack
         cd ua3f-unpack
-        ar x ../ua3f.ipk
+        # UA3F ipk 为 gzip-tar 格式 (非 ar), 解出 control.tar.gz + data.tar.gz
+        tar xzf ../ua3f.ipk
         tar xzf data.tar.gz
         cd ..
         # 全部复制进 files/（二进制 + init.d + config + luci 前端）
