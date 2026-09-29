@@ -22,7 +22,7 @@ jobs:
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install -y build-essential clang flex bison gawk gcc-multilib g++-multilib \
           gettext git libncurses-dev libssl-dev python3 python3-distutils rsync unzip zlib1g-dev \
-          file wget subversion ccache upx xsltproc libxml-parser-perl binutils
+          file wget subversion ccache xsltproc libxml-parser-perl binutils
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -32,204 +32,28 @@ jobs:
         git clone --depth=1 https://github.com/immortalwrt/immortalwrt.git -b openwrt-25.12 openwrt
         echo "OPENWRT_PATH=$PWD/openwrt" >> $GITHUB_ENV
 
-    - name: 写入 360T6GS 设备定义 (NAND)
+    - name: 写入 360T6GS 设备定义（用户原件，从仓库拉取，一字不改）
       run: |
         set -e
         cd $OPENWRT_PATH
-
-        # ========== 1. 设备树 (NAND: u-boot 512K + env 256K + Factory 256K + kernel 4MB + UBI 122MB) ==========
-        cat > target/linux/ramips/dts/mt7621_qihoo_360t6gs.dts <<'DTS_EOF'
-        // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
-
-        #include "mt7621.dtsi"
-
-        #include <dt-bindings/gpio/gpio.h>
-        #include <dt-bindings/input/input.h>
-
-        / {
-        	compatible = "qihoo,360t6gs", "mediatek,mt7621-soc";
-        	model = "Qihoo 360 T6GS";
-
-        	aliases {
-        		led-boot = &led_status_red;
-        		led-failsafe = &led_status_red;
-        		led-running = &led_status_green;
-        		led-upgrade = &led_status_green;
-        		label-mac-device = &gmac0;
-        	};
-
-        	chosen {
-        		bootargs = "console=ttyS0,115200n8";
-        	};
-
-        	leds {
-        		compatible = "gpio-leds";
-
-        		led_status_red: sys_red {
-        			label = "red:sys";
-        			gpios = <&gpio 13 GPIO_ACTIVE_LOW>;
-        		};
-
-        		led_status_green: sys_green {
-        			label = "green:sys";
-        			gpios = <&gpio 15 GPIO_ACTIVE_LOW>;
-        		};
-
-        		led_status_blue: sys_blue {
-        			label = "blue:sys";
-        			gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
-        		};
-        	};
-
-        	keys {
-        		compatible = "gpio-keys-polled";
-        		poll-interval = <20>;
-
-        		reset {
-        			label = "reset";
-        			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
-        			linux,code = <KEY_RESTART>;
-        		};
-
-        		wps {
-        			label = "wps";
-        			gpios = <&gpio 6 GPIO_ACTIVE_LOW>;
-        			linux,code = <KEY_WPS_BUTTON>;
-        		};
-        	};
-        };
-
-        &nand {
-        	status = "okay";
-
-        	partitions {
-        		compatible = "fixed-partitions";
-        		#address-cells = <1>;
-        		#size-cells = <1>;
-
-        		partition@0 {
-        			label = "u-boot";
-        			reg = <0x000000 0x080000>;
-        			read-only;
-        		};
-
-        		partition@80000 {
-        			label = "u-boot-env";
-        			reg = <0x080000 0x040000>;
-        		};
-        		partition@c0000 {
-        			label = "Factory";
-        			reg = <0x0c0000 0x040000>;
-        			read-only;
-        			nvmem-layout {
-        				compatible = "fixed-layout";
-        				#address-cells = <1>;
-        				#size-cells = <1>;
-        				eeprom_factory: eeprom@0 {
-        					reg = <0x0 0xe00>;
-        				};
-
-        				macaddr_factory_3fff4: macaddr@3fff4 {
-        					reg = <0x3fff4 0x6>;
-        				};
-
-        				macaddr_factory_3fffa: macaddr@3fffa {
-        					reg = <0x3fffa 0x6>;
-        				};
-        			};
-        		};
-        		partition@180000 {
-        			label = "kernel";
-        			reg = <0x180000 0x400000>;  /* 4MB */
-        		};
-        		partition@580000 {
-        			label = "firmware";
-        			reg = <0x580000 0x7a80000>;
-        			compatible = "linux,ubi";
-        		};
-        	};
-        };
-        &pcie {
-        	status = "okay";
-        };
-
-        &pcie1 {
-        	wifi@0,0 {
-        		compatible = "mediatek,mt76";
-        		reg = <0x0000 0 0 0 0>;
-        		nvmem-cells = <&eeprom_factory>;
-        		nvmem-cell-names = "eeprom";
-        		mediatek,disable-radar-background;
-        	};
-        };
-
-        &gmac0 {
-        	status = "okay";
-        	nvmem-cells = <&macaddr_factory_3fff4>;
-        	nvmem-cell-names = "mac-address";
-        };
-
-        &gmac1 {
-        	status = "okay";
-        	label = "wan";
-        	nvmem-cells = <&macaddr_factory_3fffa>;
-        	nvmem-cell-names = "mac-address";
-        	fixed-link {
-        		speed = <1000>;
-        		full-duplex;
-        		pause;
-        	};
-        };
-
-        &switch0 {
-        	status = "okay";
-        	ports {
-        		port@0 {
-        			status = "okay";
-        			label = "lan1";
-        		};
-        		port@1 {
-        			status = "okay";
-        			label = "lan2";
-        		};
-        		port@2 {
-        			status = "okay";
-        			label = "lan3";
-        		};
-        		port@3 {
-        			status = "okay";
-        			label = "wan";
-        		};
-        	};
-        };
-
-        &state_default {
-        	gpio {
-        		groups = "jtag", "uart3","wdt";
-        		function = "gpio";
-        	};
-        };
-        DTS_EOF
-
-        # ========== 2. mt7621.mk 追加设备 (NAND + UBI kernel 卷) ==========
-        cat >> target/linux/ramips/image/mt7621.mk <<'MK_EOF'
-
-        define Device/qihoo_360t6gs
-          $(Device/nand)
-          $(Device/uimage-lzma-loader)
-          DEVICE_VENDOR := Qihoo
-          DEVICE_MODEL := 360 T6GS
-          IMAGE_SIZE := 125000k
-          KERNEL_IN_UBI := 1
-          IMAGES += firmware.bin
-          IMAGE/firmware.bin := append-kernel | pad-to $$(KERNEL_SIZE) | append-ubi | \
-        	check-size
-          DEVICE_PACKAGES += kmod-mt7915-firmware
-        endef
-        TARGET_DEVICES += qihoo_360t6gs
-        MK_EOF
-
-        # ========== 3. platform.sh 注册 NAND sysupgrade ==========
+        # ========== 1. 设备树: 用户上传原件 (NAND UBI, kernel 4MB + UBI 122MB) ==========
+        curl -sL -o target/linux/ramips/dts/mt7621_qihoo_360t6gs.dts \
+          "https://raw.githubusercontent.com/whyyds2931/openwrt/openwrt-24.10/target/linux/ramips/dts/mt7621_qihoo_360t6gs.dts"
+        # ========== 2. mt7621.mk 360T6GS 定义块: 用户上传原件, 追加到源码 mk 末尾 ==========
+        curl -sL -o /tmp/qihoo360.mk \
+          "https://raw.githubusercontent.com/whyyds2931/openwrt/openwrt-24.10/target/linux/ramips/image/mt7621_360t6gs.mk"
+        cat /tmp/qihoo360.mk >> target/linux/ramips/image/mt7621.mk
+        echo "=== 校验用户原件 ==="
+        grep -c "qihoo_360t6gs" target/linux/ramips/image/mt7621.mk
+        # 关键校验: dts 必须是用户 NAND UBI 版 (kernel 4MB + UBI), 而非仓库老 SPI-NOR 版
+        if grep -q "linux,ubi" target/linux/ramips/dts/mt7621_qihoo_360t6gs.dts; then
+          echo "[OK] dts 为 NAND UBI 版 (用户原件)"
+        else
+          echo "[ERROR] dts 不是 NAND UBI 版, 立即终止"
+          exit 1
+        fi
+        grep -n "linux,ubi\|partition@180000" target/linux/ramips/dts/mt7621_qihoo_360t6gs.dts | head -3
+        # ========== 3. platform.sh 注册 NAND sysupgrade (源码层, 非用户文件) ==========
         python3 - <<'PY_EOF'
         p = 'target/linux/ramips/mt7621/base-files/lib/upgrade/platform.sh'
         s = open(p).read()
@@ -239,7 +63,6 @@ jobs:
         open(p, 'w').write(s)
         print('[OK] platform.sh patched')
         PY_EOF
-
         # ========== 4. 首次启动网络配置 (DSA: lan1-3 + wan) ==========
         mkdir -p files/etc/uci-defaults
         cat > files/etc/uci-defaults/99-360t6gs-network <<'UCI_EOF'
@@ -264,30 +87,30 @@ jobs:
         exit 0
         UCI_EOF
         chmod +x files/etc/uci-defaults/99-360t6gs-network
-
         echo "[OK] 设备定义写入完成"
 
-    - name: 注入 UA3F (预编译 ipk + UPX)
+    - name: 集成 UA3F（官方教程方式：源码编译，不压缩不UPX）
       run: |
         set -e
         cd $OPENWRT_PATH
-        wget -q https://github.com/SunBK201/UA3F/releases/download/v3.6.0/ua3f_3.6.0-r1_mipsel_24kc.ipk -O ua3f.ipk
-        rm -rf ua3f-unpack && mkdir ua3f-unpack
-        cd ua3f-unpack
-        # UA3F ipk 为 gzip-tar 格式 (非 ar), 解出 control.tar.gz + data.tar.gz
-        tar xzf ../ua3f.ipk
-        tar xzf data.tar.gz
-        cd ..
-        # 全部复制进 files/（二进制 + init.d + config + luci 前端）
-        mkdir -p files
-        cp -r ua3f-unpack/* files/
-        # UPX 压缩 Go 二进制 17MB -> ~3.7MB
-        upx --lzma -q -o files/usr/bin/ua3f.upx files/usr/bin/ua3f
-        mv files/usr/bin/ua3f.upx files/usr/bin/ua3f
-        chmod +x files/usr/bin/ua3f
-        echo "[OK] UA3F: $(du -h files/usr/bin/ua3f | cut -f1)"
+        # 官方教程: git clone UA3F 源码到 package/UA3F, 由 OpenWrt 源码编译
+        git clone --depth=1 https://github.com/SunBK201/UA3F.git package/UA3F
+        cd package/UA3F
+        # OpenWrt 只扫描 package/*/Makefile, 官方 Makefile 位于 openwrt/ 子目录
+        # 将 openwrt/ 内容提升到包根目录, 修正相对路径 (../go.mod -> ./go.mod)
+        cp -r openwrt/* .
+        rm -rf openwrt
+        sed -i 's|\.\./go\.mod|./go.mod|; s|\.\./go\.sum|./go.sum|; s|\.\./main\.go|./main.go|; s|\.\./cmd|./cmd|; s|\.\./internal|./internal|' Makefile
+        # 后端检测补丁: ImmortalWrt 25.12 的 TPROXY 内核模块包名是 kmod-nf-tproxy
+        # (UA3F 只检测旧包名 kmod-nft-tproxy 会误判未安装 -> 退化为 iptables 后端)
+        sed -i 's/daemon.IsPackageInstalled("kmod-nft-tproxy")/daemon.IsPackageInstalled("kmod-nft-tproxy") || daemon.IsPackageInstalled("kmod-nf-tproxy")/' internal/netfilter/firewall.go
+        echo "=== 验证补丁 ==="
+        grep -n "kmod-nf-tproxy" internal/netfilter/firewall.go
+        echo "=== 验证 Makefile ==="
+        grep -n "Package/ua3f" Makefile
+        echo "[OK] UA3F 源码集成完成 (未做任何压缩)"
 
-    - name: 注入 BitSrunLoginGo (深澜自动登录)
+    - name: 注入 BitSrunLoginGo（深澜自动登录，不压缩）
       run: |
         set -e
         cd $OPENWRT_PATH
@@ -295,7 +118,7 @@ jobs:
         rm -rf bslgo-unpack && mkdir bslgo-unpack
         tar xzf bslgo.tar.gz -C bslgo-unpack
         mkdir -p files/usr/bin files/etc/init.d files/etc/config
-        upx --lzma -q -o files/usr/bin/BitSrunLoginGo bslgo-unpack/bitsrun
+        cp bslgo-unpack/bitsrun files/usr/bin/BitSrunLoginGo
         chmod +x files/usr/bin/BitSrunLoginGo
 
         cat > files/etc/init.d/BitSrunLogin <<'INIT_EOF'
@@ -341,42 +164,7 @@ jobs:
         skip_cert_verify: false
         disable_auto_login: false
         YAML_EOF
-        echo "[OK] BitSrunLoginGo: $(du -h files/usr/bin/BitSrunLoginGo | cut -f1)"
-
-    - name: 注入 UA3F 持久 TPROXY 规则 (nftables.d + 开机路由)
-      run: |
-        set -e
-        cd $OPENWRT_PATH
-        # ========== 1. nftables.d 原生规则 (fw4 自动加载, reload 永不丢) ==========
-        mkdir -p files/etc/nftables.d
-        cat > files/etc/nftables.d/01-ua3f.nft <<'NFT_EOF'
-        # UA3F TPROXY 规则 - fw4 原生 include, 重启/重载不丢
-        table ip ua3f {
-        	chain prerouting {
-        		type filter hook prerouting priority mangle - 1; policy accept;
-        		ip protocol tcp tcp dport 80 meta mark set 1 tproxy to 127.0.0.1:1080
-        	}
-        }
-        NFT_EOF
-        # ========== 2. 开机自动加 TPROXY mark 路由 + 关闭 UA3F 自动配置避免重复 ==========
-        cat > files/etc/init.d/ua3f-tproxy <<'INIT2_EOF'
-        #!/bin/sh /etc/rc.common
-        # UA3F TPROXY mark 路由 (每次开机执行, 重启不丢)
-        START=20
-        STOP=90
-        boot() {
-        	ip rule add fwmark 1 table 100 2>/dev/null
-        	ip route add local 0.0.0.0/0 dev lo table 100 2>/dev/null
-        	# 关闭 UA3F 自动配置, 规则由 nftables.d 提供, 避免重复
-        	uci set ua3f.firewall.handle_fw=0 2>/dev/null
-        	uci commit ua3f 2>/dev/null
-        }
-        start() { boot; }
-        restart() { boot; }
-        reload() { boot; }
-        INIT2_EOF
-        chmod +x files/etc/init.d/ua3f-tproxy
-        echo "[OK] nftables.d 规则 + 开机路由已注入"
+        echo "[OK] BitSrunLoginGo: $(du -h files/usr/bin/BitSrunLoginGo | cut -f1) (未压缩)"
 
     - name: 更新 feeds
       run: |
@@ -384,7 +172,7 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 生成编译配置（官方默认基础上仅添加组件）
+    - name: 生成编译配置（官方默认 + UA3F 源码包 + 官方教程依赖）
       run: |
         cd $OPENWRT_PATH
         # 1) 先选目标设备，生成官方默认配置（不删除任何官方默认组件）
@@ -392,18 +180,15 @@ jobs:
         echo "CONFIG_TARGET_ramips_mt7621=y" >> .config
         echo "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=y" >> .config
         make defconfig 2>&1 | tail -3
-        # 2) 在官方默认基础上仅追加：LuCI 界面 + UA3F 及其依赖
+        # 2) 在官方默认基础上仅追加: UA3F 源码包及其官方教程依赖
         cat >> .config <<'ADD_EOF'
-        # --- 仅添加以下组件，不删除任何官方默认配置 ---
-        # LuCI 界面（UA3F/深澜管理需要）
+        # --- 官方教程: LuCI ---
         CONFIG_PACKAGE_luci=y
         CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
         CONFIG_PACKAGE_luci-compat=y
-        # UA3F TPROXY 内核模块 (nftables + iptables + queue)
-        CONFIG_PACKAGE_kmod-nft-tproxy=y
-        CONFIG_PACKAGE_kmod-ipt-tproxy=y
-        CONFIG_PACKAGE_kmod-nft-queue=y
-        # UA3F 依赖 (iptables TPROXY 全家)
+        # --- UA3F 源码包 (官方教程: Network->Web Servers/Proxies->ua3f) ---
+        CONFIG_PACKAGE_ua3f=y
+        # --- 官方教程依赖: 防 TTL + ipset + conntrack ---
         CONFIG_PACKAGE_ipset=y
         CONFIG_PACKAGE_iptables=y
         CONFIG_PACKAGE_iptables-mod-tproxy=y
@@ -412,13 +197,15 @@ jobs:
         CONFIG_PACKAGE_iptables-mod-nfqueue=y
         CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
         CONFIG_PACKAGE_kmod-nf-conntrack-netlink=y
+        CONFIG_PACKAGE_kmod-ipt-tproxy=y
+        CONFIG_PACKAGE_kmod-ipt-ipopt=y
+        # --- 25.12 关键: TPROXY 内核模块包名是 kmod-nf-tproxy (UA3F nft 后端 + iptables-nft 翻译都需要它) ---
+        CONFIG_PACKAGE_kmod-nf-tproxy=y
         ADD_EOF
         sed -i 's/^[[:space:]]*//' .config
         make defconfig 2>&1 | tail -3
         echo "=== 关键配置验证 ==="
-        grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=|CONFIG_PACKAGE_kmod-nft-tproxy=|CONFIG_PACKAGE_kmod-ipt-tproxy=|CONFIG_PACKAGE_kmod-nft-queue=|CONFIG_PACKAGE_luci=" .config || true
-        echo "=== 官方默认组件仍在 ==="
-        grep -cE "CONFIG_PACKAGE_(firewall4|dnsmasq|base-files|busybox|uhttpd|dropbear|odhcpd|kmod-mt76)=y" .config || true
+        grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=|CONFIG_PACKAGE_ua3f=|CONFIG_PACKAGE_kmod-nf-tproxy=|CONFIG_PACKAGE_kmod-ipt-tproxy=|CONFIG_PACKAGE_kmod-ipt-ipopt=|CONFIG_PACKAGE_ipset=|CONFIG_PACKAGE_luci=" .config || true
 
     - name: 下载依赖包
       run: |
