@@ -343,6 +343,41 @@ jobs:
         YAML_EOF
         echo "[OK] BitSrunLoginGo: $(du -h files/usr/bin/BitSrunLoginGo | cut -f1)"
 
+    - name: 注入 UA3F 持久 TPROXY 规则 (nftables.d + 开机路由)
+      run: |
+        set -e
+        cd $OPENWRT_PATH
+        # ========== 1. nftables.d 原生规则 (fw4 自动加载, reload 永不丢) ==========
+        mkdir -p files/etc/nftables.d
+        cat > files/etc/nftables.d/01-ua3f.nft <<'NFT_EOF'
+        # UA3F TPROXY 规则 - fw4 原生 include, 重启/重载不丢
+        table ip ua3f {
+        	chain prerouting {
+        		type filter hook prerouting priority mangle - 1; policy accept;
+        		ip protocol tcp tcp dport 80 meta mark set 1 tproxy to 127.0.0.1:1080
+        	}
+        }
+        NFT_EOF
+        # ========== 2. 开机自动加 TPROXY mark 路由 + 关闭 UA3F 自动配置避免重复 ==========
+        cat > files/etc/init.d/ua3f-tproxy <<'INIT2_EOF'
+        #!/bin/sh /etc/rc.common
+        # UA3F TPROXY mark 路由 (每次开机执行, 重启不丢)
+        START=20
+        STOP=90
+        boot() {
+        	ip rule add fwmark 1 table 100 2>/dev/null
+        	ip route add local 0.0.0.0/0 dev lo table 100 2>/dev/null
+        	# 关闭 UA3F 自动配置, 规则由 nftables.d 提供, 避免重复
+        	uci set ua3f.firewall.handle_fw=0 2>/dev/null
+        	uci commit ua3f 2>/dev/null
+        }
+        start() { boot; }
+        restart() { boot; }
+        reload() { boot; }
+        INIT2_EOF
+        chmod +x files/etc/init.d/ua3f-tproxy
+        echo "[OK] nftables.d 规则 + 开机路由已注入"
+
     - name: 更新 feeds
       run: |
         cd $OPENWRT_PATH
