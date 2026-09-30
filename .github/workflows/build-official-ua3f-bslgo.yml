@@ -204,11 +204,22 @@ jobs:
         # kmod-nf-tproxy  = nf_tproxy.ko (tproxy 核心, 被 kmod-nft-tproxy 依赖自动带入)
         CONFIG_PACKAGE_kmod-nft-tproxy=y
         CONFIG_PACKAGE_kmod-nf-tproxy=y
+        # --- 用户新增: 宿舍优化 + 异地组网 + 代理 + 终端 + 主题 ---
+        CONFIG_PACKAGE_luci-app-wol=y
+        CONFIG_PACKAGE_luci-app-upnp=y
+        CONFIG_PACKAGE_luci-app-autoreboot=y
+        CONFIG_PACKAGE_tailscale=y
+        CONFIG_PACKAGE_luci-app-tailscale=y
+        CONFIG_PACKAGE_sing-box=y
+        CONFIG_PACKAGE_luci-app-sing-box=y
+        CONFIG_PACKAGE_luci-app-ttyd=y
+        CONFIG_PACKAGE_luci-theme-argon=y
+        CONFIG_PACKAGE_luci-app-argon-config=y
         ADD_EOF
         sed -i 's/^[[:space:]]*//' .config
         make defconfig 2>&1 | tail -3
         echo "=== 关键配置验证 ==="
-        grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=|CONFIG_PACKAGE_ua3f=|CONFIG_PACKAGE_kmod-nft-tproxy=|CONFIG_PACKAGE_kmod-nf-tproxy=|CONFIG_PACKAGE_kmod-ipt-tproxy=|CONFIG_PACKAGE_kmod-ipt-ipopt=|CONFIG_PACKAGE_ipset=|CONFIG_PACKAGE_luci=" .config || true
+        grep -E "CONFIG_TARGET_ramips_mt7621_DEVICE_qihoo_360t6gs=|CONFIG_PACKAGE_ua3f=|CONFIG_PACKAGE_kmod-nft-tproxy=|CONFIG_PACKAGE_kmod-nf-tproxy=|CONFIG_PACKAGE_kmod-ipt-tproxy=|CONFIG_PACKAGE_kmod-ipt-ipopt=|CONFIG_PACKAGE_ipset=|CONFIG_PACKAGE_luci=|CONFIG_PACKAGE_tailscale=|CONFIG_PACKAGE_luci-app-sing-box=|CONFIG_PACKAGE_luci-app-ttyd=|CONFIG_PACKAGE_luci-theme-argon=|CONFIG_PACKAGE_luci-app-wol=|CONFIG_PACKAGE_luci-app-upnp=|CONFIG_PACKAGE_luci-app-autoreboot=" .config || true
 
     - name: 下载依赖包
       run: |
