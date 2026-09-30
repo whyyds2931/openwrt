@@ -2,9 +2,6 @@ name: Build Official + UA3F + BSLGo (360T6GS)
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/build-official-ua3f-bslgo.yml'
 
 env:
   TZ: Asia/Shanghai
