@@ -111,7 +111,9 @@ jobs:
       run: |
         set -e
         cd $OPENWRT_PATH
-        wget -q https://github.com/Mmx233/BitSrunLoginGo/releases/download/v1.6.8/bitsrun_linux_mipsle.tar.gz -O bslgo.tar.gz
+        # 注意: 必须用 softfloat 版! MT7621 (MIPS 1004Kc) 不支持 NaN2008/hardfloat,
+        # 普通 mipsle 版在 1004Kc 上报 Illegal instruction
+        wget -q https://github.com/Mmx233/BitSrunLoginGo/releases/download/v1.6.8/bitsrun_linux_mipsle_softfloat.tar.gz -O bslgo.tar.gz
         rm -rf bslgo-unpack && mkdir bslgo-unpack
         tar xzf bslgo.tar.gz -C bslgo-unpack
         mkdir -p files/usr/bin files/etc/init.d files/etc/config
@@ -130,7 +132,7 @@ jobs:
         start_service() {
             [ -f "$CONF" ] || return 0
             procd_open_instance
-            procd_set_param command "$PROG" --config="$CONF" --daemon
+            procd_set_param command "$PROG" --config="$CONF"
             procd_set_param respawn
             procd_set_param stdout 1
             procd_set_param stderr 1
@@ -143,23 +145,45 @@ jobs:
         chmod +x files/etc/init.d/BitSrunLogin
 
         cat > files/etc/config/BitSrunLoginGo.yaml <<'YAML_EOF'
-        # BitSrunLoginGo 深澜校园网自动登录配置
-        # 修改下方 username/password/host 后保存
-        # 启用: /etc/init.d/BitSrunLogin enable && /etc/init.d/BitSrunLogin start
-        username: "你的学号"
-        password: "你的密码"
-        host: "192.168.168.168"
-        port: 2060
-        https: false
-        timeout: 10
-        auto_retry: true
-        auto_retry_delay: 60
-        auto_retry_times: 0
-        daemon: true
-        syslog: false
-        log_level: 2
-        skip_cert_verify: false
-        disable_auto_login: false
+        # BitSrunLoginGo v1.6.8 深澜校园网自动登录 (已按实测格式修正)
+        # 注意: meta 必须在顶层(不在 form 下), user_type 是 @ 后的运营商后缀
+        form:
+          domain: "10.11.1.24"
+          username: "19966942580"
+          user_type: "MYDX"
+          password: "66942580"
+        meta:
+          n: "200"
+          type: "1"
+          acid: "1"
+          enc: srun_bx1
+          os: Windows 10
+          name: windows
+          info_prefix: SRBX1
+          double_stack: false
+        settings:
+          basic:
+            https: false
+            skip_cert_verify: false
+            timeout: 5
+            interfaces: "phy1-sta0"
+            dns_server: ""
+          guardian:
+            enable: true
+            duration: 300
+            backoff:
+              enable: true
+              max_retries: 0
+              initial_duration: 2
+              max_duration: 300
+              exponent_factor: 1
+              inter_const_factor: 0
+              outer_const_factor: 0
+          log:
+            debug_level: false
+            write_file: false
+            log_path: ./
+            log_name: ""
         YAML_EOF
         echo "[OK] BitSrunLoginGo: $(du -h files/usr/bin/BitSrunLoginGo | cut -f1) (未压缩)"
 
